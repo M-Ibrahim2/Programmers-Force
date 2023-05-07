@@ -1,0 +1,75 @@
+#!/bin/bash
+
+# Get input from user
+read -p "Enter directory path to be monitored: " monitor_dir
+read -p "Enter regular expression pattern to match the file names to be monitored: " pattern
+
+# Validate the pattern
+if ! [[ "$pattern" =~ ^(input|log)_[1-9]|[1][0]|\.txt$ ]]; then
+    echo "Invalid pattern"
+    exit 1
+fi
+
+# Check if monitor directory exists and is readable
+if [ ! -d "$monitor_dir" ] || [ ! -r "$monitor_dir" ]; then
+    echo "Monitor directory does not exist or is not readable"
+    exit 1
+fi
+
+# Create backup directory if it does not exist
+backup_dir="backup_$(date +%Y-%m-%d_%H-%M-%S)"
+if [ -d "$backup_dir" ]; then
+    read -p "Backup directory already exists. Overwrite (y/n)? " overwrite
+    if [ "$overwrite" == "n" ]; then
+        backup_dir="$backup_dir-$(date +%N)"
+    fi
+fi
+mkdir -p "$backup_dir"
+
+# Define function to be called on file change
+on_change() {
+    local changed_file="$1"
+    echo "Change detected: $changed_file"
+
+    # Check if file matches pattern
+    if [[ "$changed_file" =~ $pattern ]]; then
+        echo "File $changed_file matches pattern"
+
+        # Check if file contains specific string
+        if grep -q "specific string" "$changed_file"; then
+            echo "File $changed_file contains specific string"
+
+            # Extract specific values from file
+            specific_values=$(awk '/specific string/ {print $1,$2}' "$changed_file")
+            echo "Specific values: $specific_values"
+
+            # Create backup of file
+            cp "$changed_file" "$backup_dir/"
+
+            # Modify file contents
+            sed -i 's/specific string/new value/g' "$changed_file"
+
+            # Check number of lines in file
+            num_lines=$(wc -l < "$changed_file")
+            if [ "$num_lines" -gt 10 ]; then
+                # Extract first and last 5 lines to separate file
+                head -5 "$changed_file" > /home/data/first_5_lines.txt
+                tail -5 "$changed_file" > /home/data/last_5_lines.txt
+            fi
+
+            # Compress backup directory with timestamp
+            timestamp=$(date +%Y-%m-%d_%H-%M-%S)
+            tar -czf "$backup_dir-$timestamp.tar.gz" "$backup_dir"
+        fi
+    fi
+}
+
+# Monitor directory for changes
+echo "Monitoring directory $monitor_dir for changes to files matching pattern $pattern..."
+inotifywait -m -e modify,create,delete --format '%f' "$monitor_dir" |
+while read changed_file; do
+    on_change "$changed_file"
+done
+
+# Exit script
+exit 0
